@@ -30,6 +30,41 @@ COLUMN_MAP = {
 }
 
 
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """标准化列名并填充缺失的可选列。"""
+    df.columns = df.columns.str.strip()
+    rename_map = {}
+    for col in df.columns:
+        mapped = COLUMN_MAP.get(col.strip())
+        if mapped:
+            rename_map[col] = mapped
+    df = df.rename(columns=rename_map)
+
+    # 检查必需列
+    required = {"asin", "content"}
+    missing = required - set(df.columns)
+    if missing:
+        available = list(df.columns)
+        raise ValueError(
+            f"文件缺少必需列: {missing}。可用列: {available}。"
+            f"请确认导出的是评论数据（需包含ASIN和评论内容列）。"
+        )
+
+    # 填充缺失的可选列
+    for col, default in [("title", ""), ("date", ""), ("verified", ""), ("brand", ""), ("variant", "")]:
+        if col not in df.columns:
+            df[col] = default
+    if "rating" not in df.columns:
+        df["rating"] = None
+
+    # 清洗
+    df["content"] = df["content"].fillna("").astype(str)
+    df["title"] = df["title"].fillna("").astype(str)
+    df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
+
+    return df
+
+
 def load_seller_jing_csv(filepath: Path) -> pd.DataFrame:
     """加载卖家精灵导出的CSV，自动处理编码和列名映射。"""
     filepath = Path(filepath)
@@ -46,45 +81,31 @@ def load_seller_jing_csv(filepath: Path) -> pd.DataFrame:
     else:
         raise ValueError(f"无法解码文件 {filepath}，请检查文件编码")
 
-    # 标准化列名：去除首尾空格，映射到英文
-    df.columns = df.columns.str.strip()
-    rename_map = {}
-    for col in df.columns:
-        mapped = COLUMN_MAP.get(col.strip())
-        if mapped:
-            rename_map[col] = mapped
-    df = df.rename(columns=rename_map)
+    return _normalize_columns(df)
 
-    # 检查必需列
-    required = {"asin", "content"}
-    missing = required - set(df.columns)
-    if missing:
-        available = list(df.columns)
-        raise ValueError(
-            f"CSV缺少必需列: {missing}。可用列: {available}。"
-            f"请确认导出的是评论数据（而非关键词或ASIN数据）。"
-        )
 
-    # 填充缺失的可选列
-    if "title" not in df.columns:
-        df["title"] = ""
-    if "rating" not in df.columns:
-        df["rating"] = None
-    if "date" not in df.columns:
-        df["date"] = ""
-    if "verified" not in df.columns:
-        df["verified"] = ""
-    if "brand" not in df.columns:
-        df["brand"] = ""
-    if "variant" not in df.columns:
-        df["variant"] = ""
+def load_review_file(filepath: Path) -> pd.DataFrame:
+    """加载评论数据文件，支持CSV/Excel格式，自动识别编码和列名。"""
+    filepath = Path(filepath)
+    if not filepath.exists():
+        raise FileNotFoundError(f"文件不存在: {filepath}")
 
-    # 清洗：content为空的行标记为空字符串
-    df["content"] = df["content"].fillna("").astype(str)
-    df["title"] = df["title"].fillna("").astype(str)
-    df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
+    suffix = filepath.suffix.lower()
+    if suffix in (".xlsx", ".xls"):
+        df = pd.read_excel(filepath, engine="openpyxl" if suffix == ".xlsx" else "xlrd")
+    elif suffix == ".csv":
+        for encoding in ("utf-8", "utf-8-sig", "gbk", "gb18030", "latin1"):
+            try:
+                df = pd.read_csv(filepath, encoding=encoding)
+                break
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        else:
+            raise ValueError(f"无法解码文件 {filepath}，请检查文件编码")
+    else:
+        raise ValueError(f"不支持的文件格式: {suffix}，请使用 CSV 或 Excel 文件")
 
-    return df
+    return _normalize_columns(df)
 
 
 def split_reviews_by_asin(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
