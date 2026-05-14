@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+data/
+output/
+*.db
+*.xlsx
+*.xls
+.DS_Store
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
+.claude/
+=*
